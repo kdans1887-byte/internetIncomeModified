@@ -1,4 +1,8 @@
-# :computer:	Internet Income :money_with_wings:	(Multi-Proxy, Multi-IP, Multi-VPN Support) :european_castle:	
+# :computer:	Internet Income MODIFIED by kdans1887-byte :money_with_wings:	(Multi-Proxy, Multi-IP, Multi-VPN Support) :european_castle:
+# THIS IS A MODIFIED VERSION OF THE INTERNETINCOME FROM IT'S TEST BRANCH
+## Changes include using ghcr.io/xterna/earnapp:latest for better reliability and less need for restarts "which is already built into this script", please find more info from this page: https://github.com/XternA/earnapp
+## This script also includes the all new WizardGain! Future updates will include more implementation of unoffical apps, stay tuned!
+### Please read below for information and basics about InternetIncome
 
 <img src="https://i.ibb.co/DKbwPN1/imgonline-com-ua-twotoone-2ck-Xl1-JPvw2t-D1.jpg" width="100%" height="300"/>
 
