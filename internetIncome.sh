@@ -1112,11 +1112,50 @@ start_containers() {
 
   # Starting Honeygain Pot container
   if [[ $HONEYGAIN_EMAIL && $HONEYGAIN_PASSWORD && "$HONEYGAIN_POT" = true ]]; then
-    if [ "$container_pulled" = false ]; then
-      sudo docker pull xterna/honeygain-pot:latest
-      docker_parameters=($LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $NETWORK_TUN -e EMAIL=$HONEYGAIN_EMAIL -e PASSWORD=$HONEYGAIN_PASSWORD xterna/honeygain-pot:latest)
-      execute_docker_command "HoneygainPot" "honeygainpot$UNIQUE_ID$i" "${docker_parameters[@]}"
+    # Upstream image is hosted on GHCR (repo: https://github.com/XternA/honeygain-reward)
+    if [[ "$CPU_ARCH" == "armv7l" || "$CPU_ARCH" == "armv7" || "$CPU_ARCH" == "armhf" ]]; then
+      honeygain_pot_image="ghcr.io/xterna/honeygain-pot:arm32v7"
+    else
+      honeygain_pot_image="ghcr.io/xterna/honeygain-pot"
     fi
+
+    if [ "$container_pulled" = false ]; then
+      # Pull from the official repository image first (recommended).
+      # If GHCR pull fails for any reason, fall back to building from source.
+      if ! sudo docker pull "$honeygain_pot_image"; then
+        echo -e "${YELLOW}Failed to pull $honeygain_pot_image from GHCR. Falling back to building from source (XternA/honeygain-reward).${NOCOLOUR}"
+
+        if ! command -v git >/dev/null 2>&1; then
+          echo -e "${YELLOW}git not found. Attempting to install git...${NOCOLOUR}"
+          if command -v apt-get >/dev/null 2>&1; then
+            sudo apt-get update -y && sudo apt-get install -y git
+          elif command -v dnf >/dev/null 2>&1; then
+            sudo dnf install -y git
+          elif command -v yum >/dev/null 2>&1; then
+            sudo yum install -y git
+          elif command -v apk >/dev/null 2>&1; then
+            sudo apk add --no-cache git
+          else
+            echo -e "${RED}git is required to build Honeygain Pot from source, but couldn't be installed automatically. Please install git and re-run.${NOCOLOUR}"
+            exit 1
+          fi
+        fi
+
+        hg_pot_repo_dir="$PWD/honeygain-reward"
+        if [ -d "$hg_pot_repo_dir/.git" ]; then
+          sudo git -C "$hg_pot_repo_dir" pull --ff-only
+        else
+          sudo rm -rf "$hg_pot_repo_dir"
+          sudo git clone --depth 1 https://github.com/XternA/honeygain-reward "$hg_pot_repo_dir"
+        fi
+
+        honeygain_pot_image="xterna/honeygain-pot:local"
+        sudo docker build -t "$honeygain_pot_image" "$hg_pot_repo_dir"
+      fi
+    fi
+
+    docker_parameters=($LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $NETWORK_TUN -e EMAIL=$HONEYGAIN_EMAIL -e PASSWORD=$HONEYGAIN_PASSWORD $honeygain_pot_image)
+    execute_docker_command "HoneygainPot" "honeygainpot$UNIQUE_ID$i" "${docker_parameters[@]}"
   else
     if [[ "$container_pulled" == false && "$ENABLE_LOGS" == true ]]; then
       echo -e "${RED}Honeygain Pot is not enabled. Ignoring Honeygain Pot..${NOCOLOUR}"
