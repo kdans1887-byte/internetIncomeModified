@@ -1479,12 +1479,14 @@ if [[ "$1" == "--start" ]]; then
     if [ -z "${i}" ]; then
       i=0;
     fi
+    # Only use the first valid (non-comment) proxy entry to avoid spawning multiple container stacks.
     while IFS= read -r line || [ -n "$line" ]; do
       if [[ "$line" =~ ^[^#].* ]]; then
-        i=`expr $i + 1`
+        i=1
         start_containers "$i" "$line"
+        break
       fi
-    done < $proxies_file
+    done < "$proxies_file"
   fi
 
   if [[ $STATUS == 1 ]]; then
