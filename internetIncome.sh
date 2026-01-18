@@ -68,6 +68,7 @@ back_up_folders=($titan_data_folder $bitping_data_folder $urnetwork_data_folder 
 back_up_files=($proxyrack_file $earnapp_file)
 restricted_ports=(1 7 9 11 13 15 17 19 20 21 22 23 25 37 42 43 53 69 77 79 87 95 101 102 103 104 109 110 111 113 115 117 119 123 135 137 139 143 161 179 389 427 465 512 513 514 515 526 530 531 532 540 548 554 556 563 587 601 636 993 995 1719 1720 1723 2049 3659 4045 5060 5061 6000 6566 6665 6666 6667 6668 6669 6697 10080)
 container_pulled=false
+HONEYGAIN_POT_STARTED=false
 docker_in_docker_detected=false
 
 # WatchTower container name
@@ -1112,50 +1113,63 @@ start_containers() {
 
   # Starting Honeygain Pot container
   if [[ $HONEYGAIN_EMAIL && $HONEYGAIN_PASSWORD && "$HONEYGAIN_POT" = true ]]; then
-    # Upstream image is hosted on GHCR (repo: https://github.com/XternA/honeygain-reward)
-    if [[ "$CPU_ARCH" == "armv7l" || "$CPU_ARCH" == "armv7" || "$CPU_ARCH" == "armhf" ]]; then
-      honeygain_pot_image="ghcr.io/xterna/honeygain-pot:arm32v7"
-    else
-      honeygain_pot_image="ghcr.io/xterna/honeygain-pot"
-    fi
-
-    if [ "$container_pulled" = false ]; then
-      # Pull from the official repository image first (recommended).
-      # If GHCR pull fails for any reason, fall back to building from source.
-      if ! sudo docker pull "$honeygain_pot_image"; then
-        echo -e "${YELLOW}Failed to pull $honeygain_pot_image from GHCR. Falling back to building from source (XternA/honeygain-reward).${NOCOLOUR}"
-
-        if ! command -v git >/dev/null 2>&1; then
-          echo -e "${YELLOW}git not found. Attempting to install git...${NOCOLOUR}"
-          if command -v apt-get >/dev/null 2>&1; then
-            sudo apt-get update -y && sudo apt-get install -y git
-          elif command -v dnf >/dev/null 2>&1; then
-            sudo dnf install -y git
-          elif command -v yum >/dev/null 2>&1; then
-            sudo yum install -y git
-          elif command -v apk >/dev/null 2>&1; then
-            sudo apk add --no-cache git
-          else
-            echo -e "${RED}git is required to build Honeygain Pot from source, but couldn't be installed automatically. Please install git and re-run.${NOCOLOUR}"
-            exit 1
-          fi
-        fi
-
-        hg_pot_repo_dir="$PWD/honeygain-reward"
-        if [ -d "$hg_pot_repo_dir/.git" ]; then
-          sudo git -C "$hg_pot_repo_dir" pull --ff-only
-        else
-          sudo rm -rf "$hg_pot_repo_dir"
-          sudo git clone --depth 1 https://github.com/XternA/honeygain-reward "$hg_pot_repo_dir"
-        fi
-
-        honeygain_pot_image="xterna/honeygain-pot:local"
-        sudo docker build -t "$honeygain_pot_image" "$hg_pot_repo_dir"
+    # Only start ONE Honeygain Pot container for the whole run (even if proxies.txt has many entries)
+    if [[ "$HONEYGAIN_POT_STARTED" != true ]]; then
+      # Upstream image is hosted on GHCR (repo: https://github.com/XternA/honeygain-reward)
+      if [[ "$CPU_ARCH" == "armv7l" || "$CPU_ARCH" == "armv7" || "$CPU_ARCH" == "armhf" ]]; then
+        honeygain_pot_image="ghcr.io/xterna/honeygain-pot:arm32v7"
+      else
+        honeygain_pot_image="ghcr.io/xterna/honeygain-pot"
       fi
-    fi
 
-    docker_parameters=($LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $NETWORK_TUN -e EMAIL=$HONEYGAIN_EMAIL -e PASSWORD=$HONEYGAIN_PASSWORD $honeygain_pot_image)
-    execute_docker_command "HoneygainPot" "honeygainpot$UNIQUE_ID$i" "${docker_parameters[@]}"
+      if [ "$container_pulled" = false ]; then
+        # Pull from the official repository image first (recommended).
+        # If GHCR pull fails for any reason, fall back to building from source.
+        if ! sudo docker pull "$honeygain_pot_image"; then
+          echo -e "${YELLOW}Failed to pull $honeygain_pot_image from GHCR. Falling back to building from source (XternA/honeygain-reward).${NOCOLOUR}"
+
+          if ! command -v git >/dev/null 2>&1; then
+            echo -e "${YELLOW}git not found. Attempting to install git...${NOCOLOUR}"
+            if command -v apt-get >/dev/null 2>&1; then
+              sudo apt-get update -y && sudo apt-get install -y git
+            elif command -v dnf >/dev/null 2>&1; then
+              sudo dnf install -y git
+            elif command -v yum >/dev/null 2>&1; then
+              sudo yum install -y git
+            elif command -v apk >/dev/null 2>&1; then
+              sudo apk add --no-cache git
+            else
+              echo -e "${RED}git is required to build Honeygain Pot from source, but couldn't be installed automatically. Please install git and re-run.${NOCOLOUR}"
+              exit 1
+            fi
+          fi
+
+          hg_pot_repo_dir="$PWD/honeygain-reward"
+          if [ -d "$hg_pot_repo_dir/.git" ]; then
+            sudo git -C "$hg_pot_repo_dir" pull --ff-only
+          else
+            sudo rm -rf "$hg_pot_repo_dir"
+            sudo git clone --depth 1 https://github.com/XternA/honeygain-reward "$hg_pot_repo_dir"
+          fi
+
+          honeygain_pot_image="xterna/honeygain-pot:local"
+          sudo docker build -t "$honeygain_pot_image" "$hg_pot_repo_dir"
+        fi
+      fi
+
+      honeygain_pot_container="honeygainpot$UNIQUE_ID"
+
+      # If the container already exists (re-runs), just start it; otherwise create it.
+      if sudo docker ps -a --format '{{.Names}}' | grep -qx "$honeygain_pot_container"; then
+        sudo docker start "$honeygain_pot_container" >/dev/null 2>&1 || true
+        grep -qxF "$honeygain_pot_container" "$container_names_file" 2>/dev/null || echo "$honeygain_pot_container" | tee -a "$container_names_file"
+      else
+        docker_parameters=($LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $NETWORK_TUN -e EMAIL=$HONEYGAIN_EMAIL -e PASSWORD=$HONEYGAIN_PASSWORD $honeygain_pot_image)
+        execute_docker_command "HoneygainPot" "$honeygain_pot_container" "${docker_parameters[@]}"
+      fi
+
+      HONEYGAIN_POT_STARTED=true
+    fi
   else
     if [[ "$container_pulled" == false && "$ENABLE_LOGS" == true ]]; then
       echo -e "${RED}Honeygain Pot is not enabled. Ignoring Honeygain Pot..${NOCOLOUR}"
