@@ -61,14 +61,15 @@ titan_data_folder="titan-data"
 proxyrack_file="proxyrack.txt"
 cloudflare_file="cloudflared"
 dns_resolver_file="resolv.conf"
+earn_fm_config_file="earnfm_config.json"
+connection_state_file="connection_state.txt"
 required_files=($banner_file $properties_file $firefox_profile_zipfile $restart_file $generate_device_ids_file)
-files_to_be_removed=($dns_resolver_file $cloudflare_file $container_names_file $subnets_file $networks_file $mysterium_file $ebesucher_file $adnade_file $firefox_containers_file $chrome_containers_file $adnade_containers_file $custom_chrome_file $custom_firefox_file $uprock_file)
+files_to_be_removed=($dns_resolver_file $cloudflare_file $container_names_file $subnets_file $networks_file $mysterium_file $ebesucher_file $adnade_file $firefox_containers_file $chrome_containers_file $adnade_containers_file $custom_chrome_file $custom_firefox_file $uprock_file $earn_fm_config_file $connection_state_file)
 folders_to_be_removed=($firefox_data_folder $firefox_profile_data $adnade_data_folder $chrome_data_folder $chrome_profile_data $earnapp_data_folder $dns_resolver_file)
 back_up_folders=($titan_data_folder $bitping_data_folder $urnetwork_data_folder $traffmonetizer_data_folder $mysterium_data_folder $custom_chrome_data_folder $custom_firefox_data_folder)
 back_up_files=($proxyrack_file $earnapp_file)
 restricted_ports=(1 7 9 11 13 15 17 19 20 21 22 23 25 37 42 43 53 69 77 79 87 95 101 102 103 104 109 110 111 113 115 117 119 123 135 137 139 143 161 179 389 427 465 512 513 514 515 526 530 531 532 540 548 554 556 563 587 601 636 993 995 1719 1720 1723 2049 3659 4045 5060 5061 6000 6566 6665 6666 6667 6668 6669 6697 10080)
 container_pulled=false
-HONEYGAIN_POT_STARTED=false
 docker_in_docker_detected=false
 
 # WatchTower container name
@@ -87,7 +88,7 @@ first_octet=192
 second_octet=168
 third_octet=32
 
-#Unique Id
+# Unique ID
 UNIQUE_ID=`cat /dev/urandom | LC_ALL=C tr -dc 'a-f0-9' | dd bs=1 count=32 2>/dev/null`
 
 # Use banner if exists
@@ -246,7 +247,8 @@ start_containers() {
     DNS_VOLUME="";
   fi
 
-  if [ "$container_pulled" = false ]; then
+   if [[ "$container_pulled" = false && "$START_ONLY" != true ]]; then
+
     # For users with Docker-in-Docker, the PWD path is on the host where Docker is installed.
     # The files are created in the same path as the inner Docker path.
     printf 'nameserver 8.8.8.8\nnameserver 8.8.4.4\nnameserver 1.1.1.1\nnameserver 1.0.0.1\n' > $dns_resolver_file;
@@ -284,7 +286,7 @@ start_containers() {
     CPU_PARAM="--cpus=$CPU"
   fi
 
-  if [[ $i && $proxy ]]; then
+  if [[ $i && $proxy && "$START_ONLY" != true ]]; then
     NETWORK_TUN="--network=container:tun$UNIQUE_ID$i"
 
     if [ "$MYSTERIUM" = true ]; then
@@ -356,6 +358,10 @@ start_containers() {
       custom_chrome_port="-p $custom_chrome_first_port:3200 "
     fi
 
+    if [[ $WIPTER_EMAIL && $WIPTER_PASSWORD ]]; then
+      HOST_NAME="--hostname $DEVICE_NAME$i"
+    fi
+
     combined_ports=$mysterium_port$ebesucher_port$adnade_port$custom_firefox_port$custom_chrome_port$uprock_port
 
     if [ "$vpn_enabled" = true ];then
@@ -369,7 +375,7 @@ start_containers() {
          dns_option="-e DOT=off"
       fi
       NETWORK_TUN="--network=container:gluetun$UNIQUE_ID$i"
-      docker_parameters=($LOGS_PARAM $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM  $proxy -e BLOCK_MALICIOUS=off $dns_option --device /dev/net/tun --cap-add=NET_ADMIN $combined_ports --no-healthcheck qmcgaw/gluetun:v3.37.0)
+      docker_parameters=($HOST_NAME $LOGS_PARAM $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM  $proxy -e BLOCK_MALICIOUS=off $dns_option --device /dev/net/tun --cap-add=NET_ADMIN $combined_ports --no-healthcheck qmcgaw/gluetun:v3.37.0)
       execute_docker_command "VPN" "gluetun$UNIQUE_ID$i" "${docker_parameters[@]}"
     elif [ "$vpn_enabled" = false ];then
       NETWORK_TUN="--network=multi$UNIQUE_ID$i"
@@ -389,7 +395,7 @@ start_containers() {
     elif [ "$USE_TUN2PROXY" = true ];then
       # Starting tun2proxy containers
       if [ "$container_pulled" = false ]; then
-        sudo docker pull ghcr.io/tun2proxy/tun2proxy:v0.7.16
+        sudo docker pull ghcr.io/tun2proxy/tun2proxy:v0.7.19
       fi
       if [[ "$ENABLE_LOGS" != true ]]; then
         TUN_LOG_PARAM="off"
@@ -414,7 +420,7 @@ start_containers() {
           exit 1
         fi
       fi
-      docker_parameters=($LOGS_PARAM $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $CUSTOM_NETWORK --sysctl net.ipv6.conf.default.disable_ipv6=0 --device /dev/net/tun --cap-add=NET_ADMIN $combined_ports -d ghcr.io/tun2proxy/tun2proxy:v0.7.16 $dns_option --proxy $proxy --verbosity $TUN_LOG_PARAM)
+      docker_parameters=($HOST_NAME $LOGS_PARAM $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $CUSTOM_NETWORK --sysctl net.ipv6.conf.default.disable_ipv6=0 --device /dev/net/tun --cap-add=NET_ADMIN $combined_ports -d ghcr.io/tun2proxy/tun2proxy:v0.7.19 $dns_option --proxy $proxy --verbosity $TUN_LOG_PARAM)
       execute_docker_command "Proxy" "tun$UNIQUE_ID$i" "${docker_parameters[@]}"
     else
       # Starting tun2socks containers
@@ -469,8 +475,20 @@ start_containers() {
           exit 1
         fi
       fi
-      docker_parameters=($LOGS_PARAM $TUN_DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $CUSTOM_NETWORK -e LOGLEVEL=$TUN_LOG_PARAM -e PROXY=$proxy -e EXTRA_COMMANDS="$EXTRA_COMMANDS" --device /dev/net/tun $cloudflare_volume --cap-add=NET_ADMIN $combined_ports xjasonlyu/tun2socks:v2.6.0)
+      docker_parameters=($HOST_NAME $LOGS_PARAM $TUN_DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $CUSTOM_NETWORK -e LOGLEVEL=$TUN_LOG_PARAM -e PROXY=$proxy -e EXTRA_COMMANDS="$EXTRA_COMMANDS" --device /dev/net/tun $cloudflare_volume --cap-add=NET_ADMIN $combined_ports xjasonlyu/tun2socks:v2.6.0)
       execute_docker_command "Proxy" "tun$UNIQUE_ID$i" "${docker_parameters[@]}"
+    fi
+  fi
+  
+  if [ "$START_ONLY" = true ]; then
+    if [ "$vpn_enabled" = true ];then
+      NETWORK_TUN="--network=container:gluetun$UNIQUE_ID$i"
+    elif [ "$vpn_enabled" = false ];then
+      NETWORK_TUN="--network=multi$UNIQUE_ID$i"
+    elif [ $proxy ]; then
+      NETWORK_TUN="--network=container:tun$UNIQUE_ID$i"
+    else
+      NETWORK_TUN=""
     fi
   fi
 
@@ -511,7 +529,7 @@ start_containers() {
   # Starting Uprock container
   if [ "$UPROCK" = true ]; then
     if [ "$container_pulled" = false ]; then
-      sudo docker pull --platform=linux/amd64 ghcr.io/adfly8470/uprock/uprock@sha256:4068e353606b604ba07fd17e3f3fd372c7f9ecbab8f3d958d4660fe6306e4d41
+      sudo docker pull --platform=linux/amd64 ghcr.io/bhavishyadahiya/uprock-docker/uprock@sha256:e31e5bd0ce46884ddef1a90ed743d278096f4249e8ca1cd835159638cc23b17c
     fi
     if [[ ! $proxy ]] || [ "$vpn_enabled" = false ]; then
       uprock_first_port=$(check_open_ports $uprock_first_port)
@@ -522,7 +540,7 @@ start_containers() {
       fi
       uprock_container_port="-p $local_IP_address:$uprock_first_port:5111"
     fi
-    docker_parameters=(--platform=linux/amd64 $LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $NETWORK_TUN $uprock_container_port -e VNC_PORT=5722 -e WEBSOCKIFY_PORT=5111 -e VNC_PASSWORD="internetincome" ghcr.io/adfly8470/uprock/uprock@sha256:4068e353606b604ba07fd17e3f3fd372c7f9ecbab8f3d958d4660fe6306e4d41)
+    docker_parameters=(--platform=linux/amd64 $LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $NETWORK_TUN $uprock_container_port -e VNC_PORT=5722 -e WEBSOCKIFY_PORT=5111 -e VNC_PASSWORD="internetincome" ghcr.io/bhavishyadahiya/uprock-docker/uprock@sha256:e31e5bd0ce46884ddef1a90ed743d278096f4249e8ca1cd835159638cc23b17c)
     execute_docker_command "Uprock" "uprock$UNIQUE_ID$i" "${docker_parameters[@]}"
     echo -e "${GREEN}Copy the following node url and paste in your browser${NOCOLOUR}"
     echo -e "${GREEN}You will also find the urls in the file $uprock_file in the same folder${NOCOLOUR}"
@@ -882,21 +900,6 @@ start_containers() {
     fi
   fi
 
-
-  # Starting Wizardgain container
-  # Set WIZARDGAIN_EMAIL in properties.conf. If blank, this container won't be started.
-  if [[ $WIZARDGAIN_EMAIL ]]; then
-    if [ "$container_pulled" = false ]; then
-      sudo docker pull wizardgain/worker:latest
-    fi
-    docker_parameters=($LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $NETWORK_TUN -e EMAIL=$WIZARDGAIN_EMAIL wizardgain/worker:latest)
-    execute_docker_command "Wizardgain" "wizardgain$UNIQUE_ID$i" "${docker_parameters[@]}"
-  else
-    if [[ "$container_pulled" == false && "$ENABLE_LOGS" == true ]]; then
-      echo -e "${RED}Wizardgain Email is not configured. Ignoring Wizardgain..${NOCOLOUR}"
-    fi
-  fi
-
   # Starting Traffmonetizer container
   if [[ $TRAFFMONETIZER_TOKEN ]]; then
     if [ "$CPU_ARCH" == "aarch64" ] || [ "$CPU_ARCH" == "arm64" ]; then
@@ -908,6 +911,8 @@ start_containers() {
     fi
     if [ "$container_pulled" = false ]; then
       sudo docker pull $traffmonetizer_image
+	  docker_parameters=($LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM -v /var/run/docker.sock:/var/run/docker.sock -v $(which docker):/usr/bin/docker -v $PWD:/traffmon docker:18.06.2-dind /bin/sh -c 'apk add --no-cache bash && cd /traffmon && chmod +x /traffmon/restart.sh && while true; do sleep 86400; /traffmon/restart.sh --restartTraffmonetizer; done')
+      execute_docker_command "Traffmonetizer Restart" "dindtraffmon$UNIQUE_ID$i" "${docker_parameters[@]}"
     fi
     mkdir -p $PWD/$traffmonetizer_data_folder/data$i
     sudo chmod -R 777 $PWD/$traffmonetizer_data_folder/data$i
@@ -978,16 +983,62 @@ start_containers() {
     fi
   fi
 
-  # Starting Earn Fm container
-  if [[ $EARN_FM_API ]]; then
+  # Starting Earn FM container
+  if [[ $EARN_FM_API && "$USE_EARN_FM_FLEETSHARE" != true ]]; then
     if [ "$container_pulled" = false ]; then
       sudo docker pull earnfm/earnfm-client:latest
     fi
     docker_parameters=($LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $NETWORK_TUN -e EARNFM_TOKEN=$EARN_FM_API earnfm/earnfm-client:latest)
-    execute_docker_command "EarnFm" "earnfm$UNIQUE_ID$i" "${docker_parameters[@]}"
+    execute_docker_command "EarnFM" "earnfm$UNIQUE_ID$i" "${docker_parameters[@]}"
   else
     if [[ "$container_pulled" == false && "$ENABLE_LOGS" == true ]]; then
-      echo -e "${RED}EarnFm Api is not configured. Ignoring EarnFm..${NOCOLOUR}"
+      echo -e "${RED}EarnFM Api is not configured. Ignoring EarnFM..${NOCOLOUR}"
+    fi
+  fi
+
+   # Starting Earn FM Fleetshare container
+  if [[ $EARN_FM_API && "$USE_EARN_FM_FLEETSHARE" = true ]]; then
+    if [ "$container_pulled" = false ]; then
+      sudo docker pull earnfm/fleetshare:latest
+      if [ -f "$proxies_file" ]; then
+        SOCKS_PROXIES=()
+        while IFS= read -r line; do
+          # Skip empty lines
+          [[ -z "$line" ]] && continue
+          if [[ "$line" == socks5://* ]]; then
+            # Remove socks5:// prefix for config format
+            proxy="${line#socks5://}"
+            SOCKS_PROXIES+=("\"$proxy\"")
+          fi
+        done < "$proxies_file"
+        if [[ ${#SOCKS_PROXIES[@]} -eq 0 ]]; then
+          echo -e "${RED}Proxies file $proxies_file does not have socks5 proxies. Exiting..${NOCOLOUR}"
+          exit 1
+        fi
+      	cat > "$earn_fm_config_file" <<-EOF
+	{
+	  "apiKey": "$EARN_FM_API",
+	  "devices": {
+	    "subnets": [],
+	    "socksProxies": [$(IFS=,; echo "${SOCKS_PROXIES[*]}")]
+	  },
+	  "debug": false
+	}
+	EOF
+        if [ ! -f "$earn_fm_config_file" ]; then
+          echo -e "${RED}Config file could not be generated for EarnFM Fleetshare. Exiting..${NOCOLOUR}"
+          exit 1
+        fi
+        docker_parameters=($LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM -v $PWD/$earn_fm_config_file:/app/config.json earnfm/fleetshare:latest)
+        execute_docker_command "EarnFM Fleetshare" "earnfm$UNIQUE_ID$i" "${docker_parameters[@]}"
+      else
+        echo -e "${RED}Proxies file $proxies_file does not exist. Exiting..${NOCOLOUR}"
+        exit 1
+      fi
+    fi
+  else
+    if [[ "$container_pulled" == false && "$ENABLE_LOGS" == true ]]; then
+      echo -e "${RED}EarnFM Fleetshare is not configured. Ignoring EarnFM Fleetshare..${NOCOLOUR}"
     fi
   fi
 
@@ -1079,9 +1130,12 @@ start_containers() {
   # Starting Wipter container
   if [[ $WIPTER_EMAIL && $WIPTER_PASSWORD ]]; then
     if [ "$container_pulled" = false ]; then
-      sudo docker pull ghcr.io/adfly8470/wipter/wipter@sha256:9b1a7742bfbbd68e86eea1719f606c7d10c884e2578a4fb35f109eed387619cd
+      sudo docker pull techroy23/docker-wipter:latest
     fi
-    docker_parameters=($LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $NETWORK_TUN -e WIPTER_EMAIL=$WIPTER_EMAIL -e WIPTER_PASSWORD=$WIPTER_PASSWORD ghcr.io/adfly8470/wipter/wipter@sha256:9b1a7742bfbbd68e86eea1719f606c7d10c884e2578a4fb35f109eed387619cd)
+    if [[ "$NETWORK_TUN" == --network=multi* || -z "$proxy" ]]; then
+      WIPTER_HOST_NAME="--hostname $DEVICE_NAME$i"
+    fi
+    docker_parameters=($WIPTER_HOST_NAME $LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $NETWORK_TUN -e WIPTER_EMAIL=$WIPTER_EMAIL -e WIPTER_PASSWORD=$WIPTER_PASSWORD techroy23/docker-wipter:latest)
     execute_docker_command "Wipter" "wipter$UNIQUE_ID$i" "${docker_parameters[@]}"
   else
     if [[ "$container_pulled" == false && "$ENABLE_LOGS" == true ]]; then
@@ -1113,62 +1167,10 @@ start_containers() {
 
   # Starting Honeygain Pot container
   if [[ $HONEYGAIN_EMAIL && $HONEYGAIN_PASSWORD && "$HONEYGAIN_POT" = true ]]; then
-    # Only start ONE Honeygain Pot container for the whole run (even if proxies.txt has many entries)
-    if [[ "$HONEYGAIN_POT_STARTED" != true ]]; then
-      # Upstream image is hosted on GHCR (repo: https://github.com/XternA/honeygain-reward)
-      if [[ "$CPU_ARCH" == "armv7l" || "$CPU_ARCH" == "armv7" || "$CPU_ARCH" == "armhf" ]]; then
-        honeygain_pot_image="ghcr.io/xterna/honeygain-pot:arm32v7"
-      else
-        honeygain_pot_image="ghcr.io/xterna/honeygain-pot"
-      fi
-
-      if [ "$container_pulled" = false ]; then
-        # Pull from the official repository image first (recommended).
-        # If GHCR pull fails for any reason, fall back to building from source.
-        if ! sudo docker pull "$honeygain_pot_image"; then
-          echo -e "${YELLOW}Failed to pull $honeygain_pot_image from GHCR. Falling back to building from source (XternA/honeygain-reward).${NOCOLOUR}"
-
-          if ! command -v git >/dev/null 2>&1; then
-            echo -e "${YELLOW}git not found. Attempting to install git...${NOCOLOUR}"
-            if command -v apt-get >/dev/null 2>&1; then
-              sudo apt-get update -y && sudo apt-get install -y git
-            elif command -v dnf >/dev/null 2>&1; then
-              sudo dnf install -y git
-            elif command -v yum >/dev/null 2>&1; then
-              sudo yum install -y git
-            elif command -v apk >/dev/null 2>&1; then
-              sudo apk add --no-cache git
-            else
-              echo -e "${RED}git is required to build Honeygain Pot from source, but couldn't be installed automatically. Please install git and re-run.${NOCOLOUR}"
-              exit 1
-            fi
-          fi
-
-          hg_pot_repo_dir="$PWD/honeygain-reward"
-          if [ -d "$hg_pot_repo_dir/.git" ]; then
-            sudo git -C "$hg_pot_repo_dir" pull --ff-only
-          else
-            sudo rm -rf "$hg_pot_repo_dir"
-            sudo git clone --depth 1 https://github.com/XternA/honeygain-reward "$hg_pot_repo_dir"
-          fi
-
-          honeygain_pot_image="xterna/honeygain-pot:local"
-          sudo docker build -t "$honeygain_pot_image" "$hg_pot_repo_dir"
-        fi
-      fi
-
-      honeygain_pot_container="honeygainpot$UNIQUE_ID"
-
-      # If the container already exists (re-runs), just start it; otherwise create it.
-      if sudo docker ps -a --format '{{.Names}}' | grep -qx "$honeygain_pot_container"; then
-        sudo docker start "$honeygain_pot_container" >/dev/null 2>&1 || true
-        grep -qxF "$honeygain_pot_container" "$container_names_file" 2>/dev/null || echo "$honeygain_pot_container" | tee -a "$container_names_file"
-      else
-        docker_parameters=($LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $NETWORK_TUN -e EMAIL=$HONEYGAIN_EMAIL -e PASSWORD=$HONEYGAIN_PASSWORD $honeygain_pot_image)
-        execute_docker_command "HoneygainPot" "$honeygain_pot_container" "${docker_parameters[@]}"
-      fi
-
-      HONEYGAIN_POT_STARTED=true
+    if [ "$container_pulled" = false ]; then
+      sudo docker pull xterna/honeygain-pot:latest
+      docker_parameters=($LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $NETWORK_TUN -e EMAIL=$HONEYGAIN_EMAIL -e PASSWORD=$HONEYGAIN_PASSWORD xterna/honeygain-pot:latest)
+      execute_docker_command "HoneygainPot" "honeygainpot$UNIQUE_ID$i" "${docker_parameters[@]}"
     fi
   else
     if [[ "$container_pulled" == false && "$ENABLE_LOGS" == true ]]; then
@@ -1208,6 +1210,19 @@ start_containers() {
     fi
   fi
 
+  # Starting AntGain container
+  if [[ $ANTGAIN_API_KEY ]]; then
+    if [ "$container_pulled" = false ]; then
+      sudo docker pull --platform=linux/amd64 pinors/antgain-cli:latest
+    fi
+    docker_parameters=(--platform=linux/amd64 $LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $NETWORK_TUN -e ANTGAIN_API_KEY=$ANTGAIN_API_KEY pinors/antgain-cli:latest run)
+    execute_docker_command "AntGain" "antgain$UNIQUE_ID$i" "${docker_parameters[@]}"
+  else
+    if [[ "$container_pulled" == false && "$ENABLE_LOGS" == true ]]; then
+      echo -e "${RED}AntGain API is not configured. Ignoring AntGain..${NOCOLOUR}"
+    fi
+  fi
+
   # Starting Peer2Profit container
   if [[ $PEER2PROFIT_EMAIL ]]; then
     if [ "$container_pulled" = false ]; then
@@ -1218,6 +1233,19 @@ start_containers() {
   else
     if [[ "$container_pulled" == false && "$ENABLE_LOGS" == true ]]; then
       echo -e "${RED}Peer2Profit Email is not configured. Ignoring Peer2Profit..${NOCOLOUR}"
+    fi
+  fi
+
+  # Starting WizardGain container
+  if [[ $WIZARD_GAIN_EMAIL ]]; then
+    if [ "$container_pulled" = false ]; then
+      sudo docker pull wizardgain/worker:latest
+    fi
+    docker_parameters=($LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $NETWORK_TUN -e EMAIL=$WIZARD_GAIN_EMAIL wizardgain/worker:latest)
+    execute_docker_command "WizardGain" "wizardgain$UNIQUE_ID$i" "${docker_parameters[@]}"
+  else
+    if [[ "$container_pulled" == false && "$ENABLE_LOGS" == true ]]; then
+      echo -e "${RED}WizardGain Email is not configured. Ignoring WizardGain..${NOCOLOUR}"
     fi
   fi
 
@@ -1359,6 +1387,96 @@ if ! command -v docker &> /dev/null; then
   exit 1
 fi
 
+if [[ "$1" == "--startOnly" ]]; then
+  shift   # remove --startOnly
+  # Read -e arguments and export variables to the current shell
+  while [[ $# -gt 0 ]]; do
+    # Look only for -e
+    if [[ "$1" == "-e" ]]; then
+      shift
+      line="$1"
+      # Split the line at the first occurrence of =
+      key="${line%%=*}"
+      value="${line#*=}"
+      # Trim leading and trailing whitespace from key and value
+      key="${key%"${key##*[![:space:]]}"}"
+      value="${value%"${value##*[![:space:]]}"}"
+      # Ignore lines without a value after =
+      if [[ -n $value ]]; then
+          # Replace variables with their values 
+          value="$value"
+          # Export the key-value pairs as variables
+          export "$key"="$value"
+      fi
+    fi
+    shift
+  done
+  # Check if connection state file exists
+  if [ ! -f "$connection_state_file" ]; then
+    echo -e "${RED}Required file $connection_state_file does not exist. Exiting..${NOCOLOUR}"
+    exit 1
+  fi
+  # Check if container names file exists
+  if [ ! -f "$container_names_file" ]; then
+    echo -e "${RED}Required file $container_names_file does not exist. Exiting..${NOCOLOUR}"
+    exit 1
+  fi
+  # Read the first line of the file
+  CURRENT_ID=$(head -n 1 "$connection_state_file")
+  if [ -n "$CURRENT_ID" ]; then
+    UNIQUE_ID=$CURRENT_ID
+  else
+    echo -e "${RED}Unique ID is not present in $connection_state_file. Exiting..${NOCOLOUR}"
+    exit 1
+  fi
+  START_ONLY=true
+  if grep -q "DIRECT_CONNECTION_ENABLED" "$connection_state_file"; then
+    start_containers
+  fi
+  i=0
+  for container in `cat $container_names_file | grep ^gluetun`
+  do
+    i=`expr $i + 1`
+    start_containers "$i" "$container" "true"
+  done
+  MULTI_IP_CONTAINER_COUNT=0
+  if [ -f $networks_file ]; then
+    # Count containers whose names start with 'multi'
+    MULTI_IP_CONTAINER_COUNT=$(grep -c '^multi' "$networks_file")
+  fi
+  if [ "$MULTI_IP_CONTAINER_COUNT" -gt 0 ]; then
+    # Check if container names file exists
+    if [ ! -f "$multi_ip_file" ]; then
+      echo -e "${RED}Required file $multi_ip_file does not exist. Exiting..${NOCOLOUR}"
+      exit 1
+    fi
+    MULTI_IP_COUNT=0
+    while IFS= read -r line || [ -n "$line" ]; do
+      # Ignore lines starting with #
+      if [[ "$line" =~ ^[^#].* ]]; then
+        MULTI_IP_COUNT=$((MULTI_IP_COUNT + 1))
+      fi
+    done < $multi_ip_file
+    # Check if both IP count and container count matches
+    if [ "$MULTI_IP_CONTAINER_COUNT" -ne "$MULTI_IP_COUNT" ]; then
+      echo -e "${RED}Multi IP Count does not match with the number of running containers. Exiting..${NOCOLOUR}"
+      exit 1
+    fi
+    while IFS= read -r line || [ -n "$line" ]; do
+      if [[ "$line" =~ ^[^#].* ]]; then
+        i=`expr $i + 1`
+        start_containers "$i" "$line" "false"
+      fi
+    done < $multi_ip_file
+  fi
+  for container in `cat $container_names_file | grep ^tun`
+  do
+    i=`expr $i + 1`
+    start_containers "$i" "$container"
+  done
+  exit 1
+fi
+
 # Start the containers
 if [[ "$1" == "--start" ]]; then
   echo -e "\n\nStarting.."
@@ -1425,8 +1543,12 @@ if [[ "$1" == "--start" ]]; then
     DEVICE_NAME=ubuntu
   fi
 
+  # Write Unique ID to file
+  echo $UNIQUE_ID > $connection_state_file
+
   # Use direct Connection
   if [ "$USE_DIRECT_CONNECTION" = true ]; then
+     echo "DIRECT_CONNECTION_ENABLED" >> $connection_state_file
      STATUS=1
      echo -e "${GREEN}USE_DIRECT_CONNECTION is enabled, using direct internet connection..${NOCOLOUR}"
      start_containers
@@ -1434,6 +1556,7 @@ if [[ "$1" == "--start" ]]; then
 
   # Use Vpns
   if [ "$USE_VPNS" = true ]; then
+    echo "VPN_ENABLED" >> $connection_state_file
     STATUS=1
     echo -e "${GREEN}USE_VPNS is enabled, using vpns..${NOCOLOUR}"
     if [ ! -f "$vpns_file" ]; then
@@ -1457,6 +1580,7 @@ if [[ "$1" == "--start" ]]; then
 
   # Use Multi IPs
   if [ "$USE_MULTI_IP" = true ]; then
+    echo "MULTI_IP_ENABLED" >> $connection_state_file
     STATUS=1
     echo -e "${GREEN}USE_MULTI_IP is enabled, using multi ip..${NOCOLOUR}"
     if [ ! -f "$multi_ip_file" ]; then
@@ -1480,6 +1604,7 @@ if [[ "$1" == "--start" ]]; then
 
   # Use Proxies
   if [ "$USE_PROXIES" = true ]; then
+    echo "PROXY_ENABLED" >> $connection_state_file
     STATUS=1
     echo -e "${GREEN}USE_PROXIES is enabled, using proxies..${NOCOLOUR}"
     if [ ! -f "$proxies_file" ]; then
@@ -1669,4 +1794,4 @@ if [[ "$1" == "--deleteBackup" ]]; then
   exit 1
 fi
 
-echo -e "Valid options are: ${RED}--start${NOCOLOUR}, ${RED}--delete${NOCOLOUR}, ${RED}--deleteBackup${NOCOLOUR}, ${RED}--stop${NOCOLOUR}, ${RED}--restart${NOCOLOUR}"
+echo -e "Valid options are: ${RED}--start${NOCOLOUR}, ${RED}--startOnly${NOCOLOUR}, ${RED}--delete${NOCOLOUR}, ${RED}--deleteBackup${NOCOLOUR}, ${RED}--stop${NOCOLOUR}, ${RED}--restart${NOCOLOUR}"
