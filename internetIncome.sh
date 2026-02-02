@@ -63,8 +63,10 @@ cloudflare_file="cloudflared"
 dns_resolver_file="resolv.conf"
 earn_fm_config_file="earnfm_config.json"
 connection_state_file="connection_state.txt"
+ur_proxies_file="ur_proxies.txt"
+ur_data_proxies_file="$urnetwork_data_folder/data/.urnetwork/proxy"
 required_files=($banner_file $properties_file $firefox_profile_zipfile $restart_file $generate_device_ids_file)
-files_to_be_removed=($dns_resolver_file $cloudflare_file $container_names_file $subnets_file $networks_file $mysterium_file $ebesucher_file $adnade_file $firefox_containers_file $chrome_containers_file $adnade_containers_file $custom_chrome_file $custom_firefox_file $uprock_file $earn_fm_config_file $connection_state_file)
+files_to_be_removed=($dns_resolver_file $cloudflare_file $container_names_file $subnets_file $networks_file $mysterium_file $ebesucher_file $adnade_file $firefox_containers_file $chrome_containers_file $adnade_containers_file $custom_chrome_file $custom_firefox_file $uprock_file $earn_fm_config_file $connection_state_file $ur_proxies_file $ur_data_proxies_file)
 folders_to_be_removed=($firefox_data_folder $firefox_profile_data $adnade_data_folder $chrome_data_folder $chrome_profile_data $earnapp_data_folder $dns_resolver_file)
 back_up_folders=($titan_data_folder $bitping_data_folder $urnetwork_data_folder $traffmonetizer_data_folder $mysterium_data_folder $custom_chrome_data_folder $custom_firefox_data_folder)
 back_up_files=($proxyrack_file $earnapp_file)
@@ -425,7 +427,11 @@ start_containers() {
     else
       # Starting tun2socks containers
       if [ "$container_pulled" = false ]; then
-        sudo docker pull xjasonlyu/tun2socks:v2.6.0
+        if [ "$USE_SOCKS5_DNS" = true ]; then
+          sudo docker pull ghcr.io/heiher/hev-socks5-tunnel:2.14.3
+        else
+          sudo docker pull xjasonlyu/tun2socks:v2.6.0
+        fi
       fi
       if [ "$USE_SOCKS5_DNS" = true ]; then
         TUN_DNS_VOLUME="$DNS_VOLUME"
@@ -475,8 +481,32 @@ start_containers() {
           exit 1
         fi
       fi
-      docker_parameters=($HOST_NAME $LOGS_PARAM $TUN_DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $CUSTOM_NETWORK -e LOGLEVEL=$TUN_LOG_PARAM -e PROXY=$proxy -e EXTRA_COMMANDS="$EXTRA_COMMANDS" --device /dev/net/tun $cloudflare_volume --cap-add=NET_ADMIN $combined_ports xjasonlyu/tun2socks:v2.6.0)
-      execute_docker_command "Proxy" "tun$UNIQUE_ID$i" "${docker_parameters[@]}"
+      if [[ "$USE_SOCKS5_DNS" == "true" && "$proxy" == socks5://* ]]; then
+        SOCKS_PROXY=$proxy
+        # Strip scheme
+        SOCKS_NO_SCHEME="${SOCKS_PROXY#socks5://}"
+        # If auth exists, split it
+        if [[ "$SOCKS_NO_SCHEME" == *@* ]]; then
+          SOCKS_CREDS="${SOCKS_NO_SCHEME%@*}"
+          SOCKS_HOSTPORT="${SOCKS_NO_SCHEME#*@}"
+          SOCKS_USER="${SOCKS_CREDS%%:*}"
+          SOCKS_PASS="${SOCKS_CREDS#*:}"
+        else
+          SOCKS_HOSTPORT="$SOCKS_NO_SCHEME"
+          SOCKS_USER=""
+          SOCKS_PASS=""
+        fi
+        SOCKS_ADDR="${SOCKS_HOSTPORT%%:*}"
+        SOCKS_PORT="${SOCKS_HOSTPORT##*:}"
+        if [[ "$ENABLE_LOGS" != true ]]; then
+          TUN_LOG_PARAM="warn"
+        fi
+        docker_parameters=($HOST_NAME $LOGS_PARAM $TUN_DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $CUSTOM_NETWORK -e LOG_LEVEL=$TUN_LOG_PARAM -v '/dev/net/tun:/dev/net/tun' --cap-add=NET_ADMIN $combined_ports -e SOCKS5_ADDR="$SOCKS_ADDR" -e SOCKS5_PORT="$SOCKS_PORT" -e SOCKS5_USERNAME="$SOCKS_USER" -e SOCKS5_PASSWORD="$SOCKS_PASS" --no-healthcheck ghcr.io/heiher/hev-socks5-tunnel:2.14.3)
+        execute_docker_command "Proxy" "tun$UNIQUE_ID$i" "${docker_parameters[@]}"
+      else
+        docker_parameters=($HOST_NAME $LOGS_PARAM $TUN_DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $CUSTOM_NETWORK -e LOGLEVEL=$TUN_LOG_PARAM -e PROXY=$proxy -e EXTRA_COMMANDS="$EXTRA_COMMANDS" --device /dev/net/tun $cloudflare_volume --cap-add=NET_ADMIN $combined_ports xjasonlyu/tun2socks:v2.6.0)
+        execute_docker_command "Proxy" "tun$UNIQUE_ID$i" "${docker_parameters[@]}"
+      fi
     fi
   fi
   
@@ -940,11 +970,60 @@ start_containers() {
           exit 1
         fi
       fi
-      docker_parameters=($LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM -v /var/run/docker.sock:/var/run/docker.sock -v $(which docker):/usr/bin/docker -v $PWD:/urnetwork docker:18.06.2-dind /bin/sh -c 'apk add --no-cache bash && cd /urnetwork && chmod +x /urnetwork/restart.sh && while true; do sleep 86400; /urnetwork/restart.sh --restartURnetwork; done')
-      execute_docker_command "URnetwork Restart" "dindurnetwork$UNIQUE_ID$i" "${docker_parameters[@]}"
-    fi  
-    docker_parameters=($LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $NETWORK_TUN -v "$PWD/$urnetwork_data_folder/data/.urnetwork:/root/.urnetwork" bringyour/community-provider:latest provide)
-    execute_docker_command "URnetwork" "urnetwork$UNIQUE_ID$i" "${docker_parameters[@]}"
+      if [ "$UR_NETWORK_PROXY_MODE" = true ]; then
+        if [ -f "$proxies_file" ]; then
+          SOCKS_PROXIES=()
+          while IFS= read -r line; do
+            # Skip empty lines
+            [[ -z "$line" ]] && continue
+            if [[ "$line" == socks5://* ]]; then
+              # Remove socks5:// prefix for config format
+              SOCKS_PROXY=$line
+              # Strip scheme
+              SOCKS_NO_SCHEME="${SOCKS_PROXY#socks5://}"
+              # If auth exists, split it
+              if [[ "$SOCKS_NO_SCHEME" == *@* ]]; then
+                SOCKS_CREDS="${SOCKS_NO_SCHEME%@*}"
+                SOCKS_HOSTPORT="${SOCKS_NO_SCHEME#*@}"
+                SOCKS_USER="${SOCKS_CREDS%%:*}"
+                SOCKS_PASS="${SOCKS_CREDS#*:}"
+              else
+                SOCKS_HOSTPORT="$SOCKS_NO_SCHEME"
+                SOCKS_USER=""
+                SOCKS_PASS=""
+              fi
+              SOCKS_ADDR="${SOCKS_HOSTPORT%%:*}"
+              SOCKS_PORT="${SOCKS_HOSTPORT##*:}"
+	          if [[ $SOCKS_USER && $SOCKS_PASS ]]; then
+                echo "$SOCKS_ADDR:$SOCKS_PORT:$SOCKS_USER:$SOCKS_PASS" >> $ur_proxies_file
+              else
+                echo "$SOCKS_ADDR:$SOCKS_PORT" >> $ur_proxies_file
+              fi
+            fi
+          done < "$proxies_file"
+        fi
+	    if [ ! -f "$ur_proxies_file" ]; then
+          echo -e "${RED}Proxies file $ur_proxies_file does not have socks5 proxies. Exiting..${NOCOLOUR}"
+          exit 1
+        fi
+	    # Generate proxy file using urnetwork
+	    sudo docker run --rm $DNS_VOLUME -v "$PWD/$urnetwork_data_folder/data/.urnetwork:/root/.urnetwork" -v "$PWD/$ur_proxies_file:/root/ur_proxy.txt" bringyour/community-provider:latest proxy add --proxy_file=/root/ur_proxy.txt
+	    sleep 1
+	    if [ ! -f "$PWD/$urnetwork_data_folder/data/.urnetwork/proxy" ]; then
+          echo -e "${RED}Proxy file could not be generated for URnetwork. Exiting..${NOCOLOUR}"
+          exit 1
+        fi
+	    docker_parameters=($LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM -v "$PWD/$urnetwork_data_folder/data/.urnetwork:/root/.urnetwork" bringyour/community-provider:latest provide)
+        execute_docker_command "URnetwork" "urnetwork$UNIQUE_ID$i" "${docker_parameters[@]}"
+      else 
+        docker_parameters=($LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM -v /var/run/docker.sock:/var/run/docker.sock -v $(which docker):/usr/bin/docker -v $PWD:/urnetwork docker:18.06.2-dind /bin/sh -c 'apk add --no-cache bash && cd /urnetwork && chmod +x /urnetwork/restart.sh && while true; do sleep 86400; /urnetwork/restart.sh --restartURnetwork; done')
+        execute_docker_command "URnetwork Restart" "dindurnetwork$UNIQUE_ID$i" "${docker_parameters[@]}"
+      fi
+    fi 
+    if [ "$UR_NETWORK_PROXY_MODE" != true ]; then
+      docker_parameters=($LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $NETWORK_TUN -v "$PWD/$urnetwork_data_folder/data/.urnetwork:/root/.urnetwork" bringyour/community-provider:latest provide)
+      execute_docker_command "URnetwork" "urnetwork$UNIQUE_ID$i" "${docker_parameters[@]}"
+    fi
   else
     if [[ "$container_pulled" == false && "$ENABLE_LOGS" == true ]]; then
       echo -e "${RED}URnetwork Node is not enabled. Ignoring URnetwork..${NOCOLOUR}"
@@ -1007,8 +1086,8 @@ start_containers() {
           [[ -z "$line" ]] && continue
           if [[ "$line" == socks5://* ]]; then
             # Remove socks5:// prefix for config format
-            proxy="${line#socks5://}"
-            SOCKS_PROXIES+=("\"$proxy\"")
+            earn_proxy="${line#socks5://}"
+            SOCKS_PROXIES+=("\"$earn_proxy\"")
           fi
         done < "$proxies_file"
         if [[ ${#SOCKS_PROXIES[@]} -eq 0 ]]; then
@@ -1215,7 +1294,7 @@ start_containers() {
     if [ "$container_pulled" = false ]; then
       sudo docker pull --platform=linux/amd64 pinors/antgain-cli:latest
     fi
-    docker_parameters=(--platform=linux/amd64 $LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $NETWORK_TUN -e ANTGAIN_API_KEY=$ANTGAIN_API_KEY pinors/antgain-cli:latest run)
+    docker_parameters=(--platform=linux/amd64 $LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $NETWORK_TUN -e ANTGAIN_API_KEY=$ANTGAIN_API_KEY --no-healthcheck pinors/antgain-cli:latest run)
     execute_docker_command "AntGain" "antgain$UNIQUE_ID$i" "${docker_parameters[@]}"
   else
     if [[ "$container_pulled" == false && "$ENABLE_LOGS" == true ]]; then
