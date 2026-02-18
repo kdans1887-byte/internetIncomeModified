@@ -1341,19 +1341,19 @@ start_containers() {
     fi
   fi
 
-  # Starting CastarSDK container
+    # Starting CastarSDK container
   if [[ $CASTAR_SDK_KEY ]]; then
     if [ "$container_pulled" = false ]; then
-      sudo docker pull ghcr.io/adfly8470/castarsdk/castarsdk@sha256:fc07c70982ae1869181acd81f0b7314b03e0601794d4e7532b7f8435e971eaa8
+      sudo docker pull techroy23/docker-castarsdk:latest
     fi
-    docker_parameters=($LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $NETWORK_TUN -e KEY=$CASTAR_SDK_KEY ghcr.io/adfly8470/castarsdk/castarsdk@sha256:fc07c70982ae1869181acd81f0b7314b03e0601794d4e7532b7f8435e971eaa8)
+    docker_parameters=($LOGS_PARAM $DNS_VOLUME $MAX_MEMORY_PARAM $MEMORY_RESERVATION_PARAM $MEMORY_SWAP_PARAM $CPU_PARAM $NETWORK_TUN -e KEY=$CASTAR_SDK_KEY techroy23/docker-castarsdk:latest)
     execute_docker_command "CastarSDK" "castarsdk$UNIQUE_ID$i" "${docker_parameters[@]}"
   else
     if [[ "$container_pulled" == false && "$ENABLE_LOGS" == true ]]; then
       echo -e "${RED}CastarSDK is not configured. Ignoring CastarSDK..${NOCOLOUR}"
     fi
   fi
-
+  
   # Starting PacketStream container
   if [[ $PACKETSTREAM_CID ]]; then
     if [ "$container_pulled" = false ]; then
